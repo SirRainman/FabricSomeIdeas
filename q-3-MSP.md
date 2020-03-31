@@ -21,11 +21,14 @@ MSP可以给一个identity赋予一些权限，说白了MSP就是管理了一些
 前提：Fabric是一种只有被信任的节点才能参与到其中的区块链平台，因此参与者必须证明自己的身份。
 
 * 通过生成公钥和私钥的方法解决了怎样证明自己身份的问题。
-
 * MSP用来解决：在不公开私钥的前提下，使网络上的其他节点信任该节点的问题。MSP定义了网络的参与者应该信任的一些组织。另外MSP给一些member提供了一些权限。
 
 
-举例：在商店的支付场景中：CA类似于银行的角色，他负责发行银行卡；MSP类似政府财政部门，负责管理该商店只能用哪些银行卡进行支付。
+
+举例，在商店的支付场景中：
+
+- CA类似于银行的角色，他负责发行银行卡；
+- MSP类似政府财政部门，负责管理该商店只能用哪些银行卡进行支付。
 
 假如你要假如到fabric区块链中，MSP能够是你参与到permissioned 区块链中：
  1. 首先你要有一个由CA颁发的identity
@@ -62,7 +65,7 @@ MSP在区块链网络中的两个domain（译为层次？）出现
 3. 随后，`B` 希望在通道上实例化智能合约。
 4. 因为这是一个通道操作，所以通道上的所有组织都必须同意该操作。
 5. 因此，节必须检查该通道的 MSP。
-6. 节点成功提交此命令
+6. 节点成功提交此命令。
 
 
 
@@ -136,7 +139,7 @@ org使用一个MSP管理org中的所有的member
 
 
 
-# MSP Structure 
+# **MSP Structure** 
 
 ![](./images/StructureMSP.png)
 
@@ -154,7 +157,18 @@ org使用一个MSP管理org中的所有的member
 
 - **组织单元 （OU）**：组织单元被列在 `$FABRIC_CFG_PATH/msp/config.yaml` 文件中，包含了组织单元的一个列表，其中的成员被认为是由这个 MSP 所代表的组织的一部分。当你想要把一个组织的成员限定为持有一个其中包含某特定组织单元的身份（由MSP指定的某个CA签发）的成员时，它是很有用的。
 
-  指定 OU 不是必须的。如果没有列出任何 OU，MSP中的所有身份（由根 CA 和中间 CA 文件夹指出）都会被认为是组织的成员。
+  ```yaml
+  NodeOUs:
+    Enable: true # 开启身份分类
+    ClientOUIdentifier: # 定义client(或peer)的身份
+      Certificate: "cacerts/cacert.pem" # 将其设置为指定的client(或peer)的CA证书或中间CA证书路径来得到验证。该路径是相对MSP根目录的。如果该路径为空，说明该身份的X.509证书可以被任何MSP配置中的CA所验证。
+      OrganizationalUnitIdentifier: "client" # 将其设置成与clinet(或peer)的X.509证书所包含的OU匹配
+    PeerOUIdentifier:
+      Certificate: "cacerts/cacert.pem"
+      OrganizationalUnitIdentifier: "peer"
+  ```
+
+  
 
 - **管理员**：该文件夹包含了一个身份列表，其中的身份为该组织定义了哪些操作者担任管理员。对于标准的 MSP 类型来说，在这个列表中应该有一个或者多个 X509 证书。
 
@@ -189,6 +203,8 @@ org使用一个MSP管理org中的所有的member
   关于 TLS 的更多信息，点击[这里](https://hyperledger-fabric.readthedocs.io/zh_CN/release-1.4/enable_tls.html)。
 
 
+
+# MSP 实践
 
 
 
