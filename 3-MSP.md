@@ -40,21 +40,16 @@ MSP可以给一个identity赋予一些权限，说白了MSP就是管理了一些
 
 # MSP domains
 
-MSP在区块链网络中的两个domain（译为层次？）出现
+MSP在区块链网络中的两个domain（译为层次？）出现，主要体现在作用域的不同。
 
 * Local MSP: locally on an actor's node(能够管理一个节点的一些权限？)
 * Channel MSP: in channel configuration（能够管理一个channel的配置信息？）
-
-本地和通道 MSP 之间的关键区别：
-
-- 不在于它们如何工作（它们都将身份转换为角色）
-- 而在于它们的**作用域**。
 
 
 
 每个节点的信任域（例如组织）由节点的本地 MSP（例如 ORG1 或 ORG2）定义。
 
-通过将组织的 MSP 添加到通道配置中，可以表示该组织加入了通道。
+**通过将组织的 MSP 添加到通道配置中，可以表示该组织加入了通道。**
 
 下图为区块链管理员安装和实例化智能合约时所发生的情况，通道由 ORG1 和 ORG2 管理。
 
@@ -83,7 +78,7 @@ MSP在区块链网络中的两个domain（译为层次？）出现
 
 Local MSP 是为client，和node（peer 和 orderer）设计的：
 
-- 节点本地 MSP 为该节点定义权限（例如，节点管理员是谁）。
+- 节点本地 MSP 为该节点定义权限（例如，是否具有管理员权限）。
 - 用户的本地 MSP 允许用户端在其交易中作为通道的成员（例如在链码交易中）或作为系统中特定角色的所有者（例如在配置交易中的某组织管理员）对自己进行身份验证。
 
 MSP定义了谁拥有该级别的管理或参与权（节点管理员不一定是通道管理员，反之亦然），因此一个node必须由一个local msp定义一些权限。
@@ -136,6 +131,45 @@ org使用一个MSP管理org中的所有的member
 ## Node OU 
 
 没怎么看懂，仔细看一下
+
+
+
+The default MSP implementation allows organizations to further classify identities into clients, admins, peers, and orderers based on the OUs of their x509 certificates.
+
+- An identity should be classified as a **client** if it transacts on the network.
+- An identity should be classified as an **admin** if it handles administrative tasks such as joining a peer to a channel or signing a channel configuration update transaction.
+- An identity should be classified as a **peer** if it endorses or commits transactions.
+- An identity should be classified as an **orderer** if belongs to an ordering node.
+
+In order to define the clients, admins, peers, and orderers of a given MSP, the `config.yaml` file needs to be set appropriately. You can find an example NodeOU section of the `config.yaml` file below:
+
+```yaml
+NodeOUs:
+  Enable: true
+  ClientOUIdentifier:
+    Certificate: "cacerts/cacert.pem"
+    OrganizationalUnitIdentifier: "client"
+  AdminOUIdentifier:
+    Certificate: "cacerts/cacert.pem"
+    OrganizationalUnitIdentifier: "admin"
+  PeerOUIdentifier:
+    Certificate: "cacerts/cacert.pem"
+    OrganizationalUnitIdentifier: "peer"
+  OrdererOUIdentifier:
+    Certificate: "cacerts/cacert.pem"
+    OrganizationalUnitIdentifier: "orderer"
+```
+
+Identity classification is enabled when `NodeOUs.Enable` is set to `true`（如在fabric-samples/firstnetwork/cryto-config.yaml）. Then the client (admin, peer, orderer) organizational unit identifier is defined by setting the properties of the `NodeOUs.ClientOUIdentifier` (`NodeOUs.AdminOUIdentifier`, `NodeOUs.PeerOUIdentifier`, `NodeOUs.OrdererOUIdentifier`) key:
+
+1. `OrganizationalUnitIdentifier`: Is the OU value that the x509 certificate needs to contain to be considered a client (admin, peer, orderer respectively). If this field is empty, then the classification is not applied.
+2. `Certificate`: Set this to the path of the CA or intermediate CA certificate under which client (peer, admin or orderer) identities should be validated. The field is relative to the MSP root folder. This field is optional. You can leave this field blank and allow the certificate to be validated under any CA defined in the MSP configuration.
+
+Notice that if the `NodeOUs.ClientOUIdentifier` section (`NodeOUs.AdminOUIdentifier`, `NodeOUs.PeerOUIdentifier`, `NodeOUs.OrdererOUIdentifier`) is missing, then the classification is not applied. If `NodeOUs.Enable` is set to `true` and no classification keys are defined, then identity classification is assumed to be disabled.
+
+Identities can use organizational units to be classified as either a client, an admin, a peer, or an orderer. The four classifications are mutually exclusive. The 1.1 channel capability needs to be enabled before identities can be classified as clients or peers. The 1.4.3 channel capability needs to be enabled for identities to be classified as an admin or orderer.
+
+Classification allows identities to be classified as admins (and conduct administrator actions) without the certificate being stored in the `admincerts` folder of the MSP. Instead, the `admincerts` folder can remain empty and administrators can be created by enrolling identities with the admin OU. Certificates in the `admincerts` folder will still grant the role of administrator to their bearer, provided that they possess the client or admin OU.
 
 
 
