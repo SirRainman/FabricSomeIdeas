@@ -2,6 +2,8 @@
 
 # Setting chaincode-level endorsement policies
 
+每个链码都有一个背书策略与之相关联，该背书策略适用于此链码中定义的所有智能合约。背书策略非常重要，它指明了区块链网络中哪些组织必须对一个既定智能合约所生成的交易进行签名，以此来宣布该交易**有效**。
+
 Chaincode-level endorsement policies are agreed to by channel members when they approve a chaincode definition for their organization. 
 
 A sufficient number of channel members need to approve a chaincode definition to meet the `Channel/Application/LifecycleEndorsement` policy, which by default is set to a majority of channel members, before the definition can be committed to the channel. 
