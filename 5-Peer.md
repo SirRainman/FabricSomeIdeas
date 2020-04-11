@@ -14,20 +14,19 @@ Peer其实是运行账本和智能合约的实例：
 app提交交易流程：
 
 1. Hyperledger Fabric SDK 通过 APIs 使应用程序能够连接到 peers。
-   application生成交易提案proposal。
-
+   application生成交易提案proposal，其中包含调用链码的相关信息。
 2. 在交易提案能够被网络所接受之前，app必须得到背书策略所指定的peers的背书。peer使用交易提案来调用 chaincode，从而生成交易的proposal response。
-
-3. application接收到了一定数量经过背书后的proposal responses。
-
-4. application提交交易到order网络，在网络中交易会被排序
-
-   orderer提交到peer中的分布式账本中。
-
-   注：不是每个 Peer 节点都需要连接到一个排序节点，只需要一个peer主节点连接到order就可以了，然后Peer中的主节点可以使用 gossip 协议将区块关联到其他节点。（gossip的另外一个应用就是组织间的peer的相互通信）
-   每个peer节点将独立地以确定的方式验证区块，以确保账本保持一致。具体来说，通道中每个peer节点都将验证区块中的每个交易，以确保得到了所需组织的节点背书，也就是peer节点的背书和背书策略相匹配，并且不会因最初认可该事务时可能正在运行的其他最近提交的事务而失效。无效的交易仍然保留在排序节点创建的区块中，但是节点将它们标记为无效，并且不更新账本的状态。
-
-5. 在这个流程结束的时候接收到更新事件
+   1. peer 根据 proposal 的信息，调用用户上传的链码
+   2. 链码处理请求，将请求转化位对账本的读集合与写集合。
+   3. peer 对读集合和写集合进行签名，并将proposal response 返回给app SDK。
+3. application接收到了一定数量经过背书后的proposal responses，并将读集合与写集合和不同节点的签名拼接在一起，组成envelope。
+4. application提交envelope到order节点后，sdk并监听peer节点的块事件。
+   1. 在orderer集群中envelope会被排序，当orderer收集到足够多的envelope后，生成新的区块。
+   2. orderer将区块广播到peer集群中的分布式账本中。
+      注：不是每个 Peer 节点都需要连接到一个排序节点，只需要一个peer主节点连接到order就可以了，然后Peer中的主节点可以使用 gossip 协议将区块关联到其他节点。（gossip的另外一个应用就是组织间的peer的相互通信）
+   3. 每个peer节点将独立地以确定的方式验证区块，以确保账本保持一致。具体来说，通道中每个peer节点都将验证区块中的每个交易，以确保得到了所需组织的节点背书，也就是peer节点的背书和背书策略相匹配，并且不会因最初认可该事务时可能正在运行的其他最近提交的事务而失效。无效的交易仍然保留在排序节点创建的区块中，但是节点将它们标记为无效，并且不更新账本的状态。
+5. 在peer集群收到区块并进行验证之后，peer向sdk发送新收到的区块和验证结果。
+6. sdk根据时间的验证结果，判断交易是否成功上链。
 
 # Peer and Channels
 
