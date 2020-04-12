@@ -1,5 +1,11 @@
 # Fabric 区块体构造问题
 
+Fabric区块的构造主要分为三部分
+
+![](../images/block-structure.png)
+
+
+
 vendor/github.com/hyperledger/fabric-protos-go/common/common.pb.go
 
 fabric中一个区块的构造：header，data，metadata三部分

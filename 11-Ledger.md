@@ -20,6 +20,8 @@ Block 分为三部分：
 - data
 - metadata
 
+![](./images/block-structure.png)
+
 ## Block Header
 
 ![](./images/blockheader.png)
