@@ -240,6 +240,66 @@ Classification allows identities to be classified as admins (and conduct adminis
 
 # MSP 实践
 
+注意每个实体（组织、节点、用户）最终都会拥有 MSP 来代表身份信息，其中包括三种证书：
+
+1. 管理员身份的验证证书、
+2. 实体信任的 CA 的根证书、
+3. 自身身份验证（检查签名）的证书。
+4. 此外，还包括对应身份验证的签名用的私钥。
+
+```
+crypto-config
+|-- ordererOrganizations
+...
+...
+...
+`-- peerOrganizations
+    |-- org1.example.com # 存放第一个组织的相关材料，每个组织会生成单独的根证书。
+    |   |-- ca # 存放组织的根证书和对应的私钥文件，默认采用 EC 算法，证书为自签名。组
+织内的实体将基于该根证书作为相同的证书根。
+    |   |-- msp 存放代表该组织的身份信息
+    |   |   |-- admincerts 组织管理员的身份验证证书。
+    |   |   |-- cacerts 组织的根证书。
+    |   |   `-- tlscacerts
+    |   |-- peers 存放该组织下的所有 peer 节点
+    |   |   |-- peer0.org1.example.com 第一个 peer 的信息，包括 msp 证书和 tls 证书两类。
+    |   |   |   |-- msp
+    |   |   |   |   |-- admincerts 组织管理员的身份验证证书。
+    |   |   |   |   |-- cacerts 存放组织的根证书。
+    |   |   |   |   |-- keystore 本节点的身份私钥，用来签名。
+    |   |   |   |   |-- signcerts 验证本节点签名的证书，被组织根证书签名。
+    |   |   |   |   `-- tlscacerts
+    |   |   |   `-- tls
+    |   |   `-- peer1.org1.example.com
+    |   |       |-- msp
+    |   |       |   |-- admincerts
+    |   |       |   |-- cacerts
+    |   |       |   |-- keystore
+    |   |       |   |-- signcerts
+    |   |       |   `-- tlscacerts
+    |   |       `-- tls
+    |   |-- tlsca
+    |   `-- users 
+    |       |-- Admin@org1.example.com 管理员用户的信息，包括 msp 证书和 tls 证书两类。
+    |       |   |-- msp 
+    |       |   |   |-- admincerts 组织根证书作为管理者身份验证证书。
+    |       |   |   |-- cacerts 存放组织的根证书。
+    |       |   |   |-- keystore 本用户的身份私钥，用来签名。
+    |       |   |   |-- signcerts 管理员用户的身份验证证书，被组织根证书签名。
+    |       |   |   `-- tlscacerts
+    |       |   `-- tls
+    |       `-- User1@org1.example.com
+    |           |-- msp
+    |           |   |-- admincerts
+    |           |   |-- cacerts
+    |           |   |-- keystore
+    |           |   |-- signcerts
+    |           |   `-- tlscacerts
+    |           `-- tls
+    `-- org2.example.com
+        |-- ...
+```
+
 
 
 
