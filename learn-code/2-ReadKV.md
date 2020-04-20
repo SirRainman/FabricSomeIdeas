@@ -341,7 +341,7 @@ func invoke(ctx context.Context, method string, req, reply interface{}, cc *Clie
 
 ## 1 peer容器开始处理proposal
 
-1.首先peer节点会现在容器中完成启动工作，开始监听端口：
+1.首先peer节点会现在容器中完成peer节点的启动工作：
 
 ```yaml
 services:
@@ -356,6 +356,8 @@ services:
 在fabric\internal\peer\node\start.go中有详细启动的源码解释，有点复杂，将会在另外一个专题详细讨论，这里并不展开
 
 [示意图](https://github.com/yeasy/hyperledger_code_fabric/tree/master/peer/node)
+
+总之在peer节点启动之后，可以监听grpc端口，接受client发送过来的具体proposal
 
 
 
@@ -579,7 +581,7 @@ func (h *Handler) serialSendAsync(msg *pb.ChaincodeMessage) {
 
 ## 4 对读写集进行签名后返回proposal response
 
-在ProcessProposalSuccessfullyOrError的方法中，完成了对proposal response的签名
+在core\endorser\endorser.go---ProcessProposalSuccessfullyOrError的方法中，完成了对proposal response的签名
 
 ```go
 endorsement, mPrpBytes, err := e.Support.EndorseWithPlugin(escc, up.ChannelID(), prpBytes, up.SignedProposal)
