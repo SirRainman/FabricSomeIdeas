@@ -722,3 +722,6 @@ func Success(payload []byte) pb.Response {
 }
 ```
 
+# 问题
+
+1. 链码在容器中向peer查询一些数据的时候，peer是怎么根据链码容器查询的数据？
