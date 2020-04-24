@@ -10,7 +10,7 @@
 
 在初始化GossipService服务器时，peer节点就已经完成了连接其他peer节点的操作了
 
-## 1 初始化GossipSevice服务器
+## 1 入口-初始化GossipSevice服务器
 
 详细的初始化GossipService服务器已经分析过了，这里不再赘述
 
@@ -89,7 +89,7 @@ func (g *Node) connect2BootstrapPeers() {
         // identifier()方法用于获取每个远程Bootstrap中peer节点的PeerIdentification
         // 其中，PeerIdentification封装了节点的PKI-ID与SelfOrg标志位（标识是否与当前节点属于同一个组织）
 		identifier := func() (*discovery.PeerIdentification, error) {
-            // 1.与远程Peer节点建立握手连接
+            // 1.与远程Peer节点建立握手连接，拿到对方的PeerIdentity
 			remotePeerIdentity, err := g.comm.Handshake(&comm.RemotePeer{Endpoint: endpoint})
 			// 2.检查远程Bootstrap节点与当前节点是否属于同一个MSP组织。
 			sameOrg := bytes.Equal(g.selfOrg, g.secAdvisor.OrgByPeerIdentity(remotePeerIdentity))
@@ -235,7 +235,7 @@ func (s *subscription) Listen() (interface{}, error) {
    1. 该方法先处理以Nonce消息随机数为主题的消息订阅请求，将该主题消息放入订阅通道中，通知discovery模块解除sendUntilAcked()→sub.Listen()程序的阻塞等待。
    2. 接着，解析并获取接收消息中的Alive存活节点与Dead离线节点的成员消息列表，更新本地的节点信息相关列表，包括aliveLastTS、deadLastTS、aliveMembership、deadMembership等以及id2Member列表。
 
-### 1 初始化discovery
+### 1 入口-初始化discovery
 
 gossip\gossip\gossip_impl.go
 
@@ -263,7 +263,9 @@ func New(conf *Config, s *grpc.Server, sa api.SecurityAdvisor,
 
 2. NewDiscoveryService
 
-gossip\discovery\discovery_impl.go
+   gossip\discovery\discovery_impl.go
+
+   可以从执行的函数看出：peer节点的gossip服务持续不断的发送消息，和收到消息。
 
 ```go
 // NewDiscoveryService returns a new discovery service with the comm module passed and the crypto service passed
@@ -282,22 +284,23 @@ func NewDiscoveryService(self NetworkMember, comm CommService, crypt CryptoServi
 }
 ```
 
-
-
 ### 2 handleMessages
+
+接收到消息
 
 gossip\discovery\discovery_impl.go
 
 ```go
 func (d *gossipDiscoveryImpl) handleMessages() {
-	defer d.logger.Debug("Stopped")
-
+	// 拿到接收消息的缓冲区
 	in := d.comm.Accept()
 	for {
 		select {
+        // 1.如果是收到正常消息
 		case m := <-in:
 			d.handleMsgFromComm(m)
-		case <-d.toDieChan:
+		// 2.如果gossip服务停止
+        case <-d.toDieChan:
 			return
 		}
 	}
@@ -310,7 +313,7 @@ gossip\discovery\discovery_impl.go
 
 ```go
 func (d *gossipDiscoveryImpl) handleMsgFromComm(msg protoext.ReceivedMessage) {
-	
+	// 拿到GossipMessage
 	m := msg.GetGossipMessage()
 
     // 1.如果收到的是member request
@@ -359,10 +362,10 @@ func (d *gossipDiscoveryImpl) handleMsgFromComm(msg protoext.ReceivedMessage) {
 
     // 3.如果收到的是member response
 	if memResp := m.GetMemRes(); memResp != nil {
-        // 处理以Nonce消息随机数为主题的消息订阅请求，将该主题消息放入订阅通道中，通知discovery模块解除sendUntilAcked()→sub.Listen()程序的阻塞等待。
+        // 1.处理以Nonce消息随机数为主题的消息订阅请求，将该主题消息放入订阅通道中，通知discovery模块解除sendUntilAcked()→sub.Listen()程序的阻塞等待。
 		d.pubsub.Publish(fmt.Sprintf("%d", m.Nonce), m.Nonce)
         
-        //获取接收消息中的Alive存活节点的成员消息列表，更新本地的节点信息相关列表，包括aliveLastTS、deadLastTS、aliveMembership、deadMembership等以及id2Member列表。
+        // 2.获取接收消息中的Alive存活节点的成员消息列表，更新本地的节点信息相关列表，包括aliveLastTS、aliveMembership等以及id2Member列表。
 		for _, env := range memResp.Alive {
 			am, err := protoext.EnvelopeToGossipMessage(env)
 			
@@ -375,7 +378,8 @@ func (d *gossipDiscoveryImpl) handleMsgFromComm(msg protoext.ReceivedMessage) {
 				d.handleAliveMessage(am)
 			}
 		}
-        //获取接收消息中的Dead离线节点的成员消息列表，更新本地的节点信息相关列表，包括aliveLastTS、deadLastTS、aliveMembership、deadMembership等以及id2Member列表。
+        
+        // 3.获取接收消息中的Dead离线节点的成员消息列表，更新本地的节点信息相关列表，deadLastTS、deadMembership等以及id2Member列表。
 		for _, env := range memResp.Dead {
 			dm, err := protoext.EnvelopeToGossipMessage(env)
 
@@ -470,11 +474,13 @@ func (d *gossipDiscoveryImpl) handleAliveMessage(m *protoext.SignedGossipMessage
 func (ps *PubSub) Publish(topic string, item interface{}) error {
 	ps.RLock()
 	defer ps.RUnlock()
+    
 	s, subscribed := ps.subscriptions[topic]
 	if !subscribed {
 		return errors.New("no subscribers")
 	}
-	for _, sub := range s.ToArray() {
+	
+    for _, sub := range s.ToArray() {
 		c := sub.(*subscription).c
 		select {
 		case c <- item:

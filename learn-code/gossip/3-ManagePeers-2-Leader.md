@@ -6,7 +6,7 @@ gossip\service\gossip_service.go
 
 InitializeChannel()
 
-感觉前面的调用过程很复杂，不知道怎样就调用到了这里，完成该peer的gossip channel 部分的工作
+**问题：**感觉前面的调用过程很复杂，不知道怎样就调用到了这里，完成该peer的gossip channel 部分的工作
 
 ```go
 // InitializeChannel allocates the state provider and should be invoked once per channel per execution
@@ -186,11 +186,11 @@ func (le *leaderElectionSvcImpl) waitForMembershipStabilization(timeLimit time.D
     // 1.通过discovery模块获取本地保存的当前节点数量viewSize
 	viewSize := len(le.adapter.Peers())
 	for !le.shouldStop() {
-        // 等待一段时间
+        // 2.等待一段时间
 		time.Sleep(le.config.MembershipSampleInterval)
-		// 拿到网络中新的成员
+		// 3.拿到网络中新的成员
         newSize := len(le.adapter.Peers())
-		// 如果成员结构不再发生变化
+		// 4.通过成员的数量判断网络结构是否发生了变化，如果成员结构不再发生变化
         if newSize == viewSize || time.Now().After(endTime) || le.isLeaderExists() {
 			return
 		}
@@ -245,19 +245,23 @@ func (le *leaderElectionSvcImpl) run() {
 	for !le.shouldStop() {
         // 1.判断当前组织内是否已经产生了Leader主节点
 		if !le.isLeaderExists() {
-			le.leaderElection()
+			// 如果不存在leader，则开始选举
+            le.leaderElection()
 		}
 		// If we are yielding and some leader has been elected,
 		// stop yielding
-		if le.isLeaderExists() && le.isYielding() {
+        if le.isLeaderExists() && le.isYielding() {
 			le.stopYielding()
 		}
 		if le.shouldStop() {
 			return
 		}
+        
+        // 3.选举之后-如果成为了leader
 		if le.IsLeader() {
 			le.leader()
 		} else {
+        // 4.选举之后-如果没有成为leader
 			le.follower()
 		}
 	}
@@ -310,7 +314,15 @@ func (le *leaderElectionSvcImpl) leaderElection() {
 
 ### 2 成为leader
 
-最后，le.beLeader()方法调用le.callback(true)回调函数，实际上调用了election模块初始化时传入的onStatusChangeFactory()方法参数（service/gossip_service.go）。参数为true则意味着将当前节点转换为Leader主节点，并启动该节点的Deliver服务实例，代表组织负责从Orderer服务节点请求获取通道账本数据。然后，设置le.leaderExists标志位为1，以标识当前节点为Leader主节点。
+最后，le.beLeader()方法调用le.callback(true)回调函数，
+
+- 实际上调用了election模块初始化时传入的onStatusChangeFactory()方法参数（service/gossip_service.go）。
+- 参数为true则意味着将当前节点转换为Leader主节点，并启动该节点的Deliver服务实例，代表组织负责从Orderer服务节点请求获取通道账本数据。
+- 然后，设置le.leaderExists标志位为1，以标识当前节点为Leader主节点。
+
+**问：**
+
+- **这个地方的回调函数在哪里找啊，都做了什么？**
 
 ```go
 func (le *leaderElectionSvcImpl) beLeader() {
