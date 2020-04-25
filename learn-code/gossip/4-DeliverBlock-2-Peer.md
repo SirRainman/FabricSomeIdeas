@@ -108,12 +108,15 @@ func (gc *gossipChannel) HandleMessage(msg protoext.ReceivedMessage) {
 			if !gc.blockMsgStore.CheckValid(msg.GetGossipMessage()) {
 				return
 			}
+            // 通过MCS消息加密服务模块验证该区块结构的合法性，以及区块元数据中的签名是否满足指定的区块验证策略BlockValidation。
 			if !gc.verifyBlock(m.GossipMessage, msg.GetConnectionInfo().ID) {
 				return
 			}
+            // 将DataMsg消息添加到blockMsgStore与blocksPuller消息存储对象上
 			gc.Lock()
 			added = gc.blockMsgStore.Add(msg.GetGossipMessage())
 			if added {
+                // blocksPuller对象周期性地发送Pull类数据消息，以拉取并更新本地节点账本上缺失的DataMsg消息
 				gc.blocksPuller.Add(msg.GetGossipMessage())
 			}
 			gc.Unlock()
@@ -123,6 +126,7 @@ func (gc *gossipChannel) HandleMessage(msg protoext.ReceivedMessage) {
 		}
 
 		if added {
+            // 将该DataMsg消息封装为emittedGossip-Message类型消息，添加到emitter模块缓冲区中，交由emitter模块打包并发送到组织内的其他Peer节点上。
 			// Forward the message
 			gc.Forward(msg)
 			// DeMultiplex to local subscribers
@@ -136,7 +140,7 @@ func (gc *gossipChannel) HandleMessage(msg protoext.ReceivedMessage) {
 }
 ```
 
-5 messageStoreImpl.Add
+## 5 gc.blockMsgStore.Add
 
 ```go
 // add adds a message to the store
@@ -160,6 +164,70 @@ func (s *messageStoreImpl) Add(message interface{}) bool {
 
 	s.messages = append(s.messages, &msg{data: message, created: time.Now()})
 	return true
+}
+```
+
+## 6 gc.blocksPuller.Add
+
+blocksPuller对象周期性地发送Pull类数据消息，以拉取并更新本地节点账本上缺失的DataMsg消息
+
+```go
+// Add adds a GossipMessage to the store
+func (p *pullMediatorImpl) Add(msg *protoext.SignedGossipMessage) {
+	p.Lock()
+	defer p.Unlock()
+    // 提取区块号作为摘要信息
+	itemID := p.IdExtractor(msg)
+    // 添加到itemID2Msg摘要消息列表
+	p.itemID2Msg[itemID] = msg
+    // 添加到engine.state摘要对象集合中
+	p.engine.Add(itemID)
+	p.logger.Debugf("Added %s, total items: %d", itemID, len(p.itemID2Msg))
+}
+```
+
+## 7 gc.Forward
+
+将该DataMsg消息封装为emittedGossip-Message类型消息，添加到emitter模块缓冲区中，交由emitter模块打包并发送到组织内的其他Peer节点上。
+
+```go
+// Forward sends message to the next hops
+func (ga *gossipAdapterImpl) Forward(msg protoext.ReceivedMessage) {
+	ga.Node.emitter.Add(&emittedGossipMessage{
+		SignedGossipMessage: msg.GetGossipMessage(),
+		filter:              msg.GetConnectionInfo().ID.IsNotSameFilter,
+	})
+}
+```
+
+## 8 gc.DeMultiplex
+
+```go
+// DeMultiplex broadcasts the message to all channels that were returned
+// by AddChannel calls and that hold the respected predicates.
+//
+// Blocks if any one channel that would receive msg has a full buffer.
+func (m *ChannelDeMultiplexer) DeMultiplex(msg interface{}) {
+	m.lock.Lock()
+	if m.closed {
+		m.lock.Unlock()
+		return
+	}
+	channels := m.channels
+	m.deMuxInProgress.Add(1)
+	m.lock.Unlock()
+
+	for _, ch := range channels {
+		if ch.pred(msg) {
+			select {
+			case <-m.stopCh:
+				m.deMuxInProgress.Done()
+				return // stopping
+			case ch.ch <- msg:
+			}
+		}
+	}
+	m.deMuxInProgress.Done()
 }
 ```
 

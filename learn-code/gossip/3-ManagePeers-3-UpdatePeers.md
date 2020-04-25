@@ -284,7 +284,7 @@ func (da *discoveryAdapter) SendToPeer(peer *discovery.NetworkMember, msg *proto
 
 certStore模块通过Gossip服务实例的certPuller模块周期性地发送Pull类节点身份消息，请求拉取其他节点的PeerIdentity类型节点身份消息，更新本地idMapper模块的节点身份信息字典pkiID2Cert。
 
-### 1.入口
+### 1.入口-gossip 服务初始化
 
 1. 初始化Gossip服务
 
@@ -377,7 +377,24 @@ func (engine *PullEngine) initiatePull() {
 }
 ```
 
-### 6.接受端接受到拉取身份请求
+### 6.engine.Hello
+
+```go
+// Hello sends a hello message to initiate the protocol
+// and returns an NONCE that is expected to be returned
+// in the digest message.
+func (p *pullMediatorImpl) Hello(dest string, nonce uint64) {
+	...
+
+	p.logger.Debug("Sending", p.config.MsgType, "hello to", dest)
+	sMsg, err := protoext.NoopSign(helloMsg)
+	p.Sndr.Send(sMsg, p.peersWithEndpoints(dest)...)
+}
+```
+
+
+
+### 7.接受端接受到拉取身份请求
 
 **这部分没看懂啊啊啊啊啊啊！**
 
