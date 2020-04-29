@@ -1,4 +1,8 @@
-# 5 Peer节点处理数据消息并提交账本
+# 4 写在前面-将block存到账本中
+
+问题：peer节点接收到DataMsg之后，是怎么把blockMsgStore存到缓冲区中的？
+
+
 
 ## 0.入口
 
@@ -135,6 +139,58 @@ func NewGossipStateProvider(
 	config *StateConfig,
 ) GossipStateProvider {
 	
+    // 0.准备工作---拿到gossipChan
+    gossipChan, _ := services.Accept(func(message interface{}) bool {
+		// Get only data messages
+		return protoext.IsDataMsg(message.(*proto.GossipMessage)) &&
+			bytes.Equal(message.(*proto.GossipMessage).Channel, []byte(chainID))
+	}, false)
+
+	remoteStateMsgFilter := func(message interface{}) bool {
+		receivedMsg := message.(protoext.ReceivedMessage)
+		msg := receivedMsg.GetGossipMessage()
+		if !(protoext.IsRemoteStateMessage(msg.GossipMessage) || msg.GetPrivateData() != nil) {
+			return false
+		}
+		// Ensure we deal only with messages that belong to this channel
+		if !bytes.Equal(msg.Channel, []byte(chainID)) {
+			return false
+		}
+		connInfo := receivedMsg.GetConnectionInfo()
+		authErr := services.VerifyByChannel(msg.Channel, connInfo.Identity, connInfo.Auth.Signature, connInfo.Auth.SignedData)
+		if authErr != nil {
+			logger.Warning("Got unauthorized request from", string(connInfo.Identity))
+			return false
+		}
+		return true
+	}
+
+    // 0.准备工作---拿到commChan
+	// Filter message which are only relevant for nodeMetastate transfer
+	_, commChan := services.Accept(remoteStateMsgFilter, true)
+
+	height, err := ledger.LedgerHeight()
+	
+	s := &GossipStateProviderImpl{
+		logger: logger,
+		// MessageCryptoService
+		mediator: services,
+		// Chain ID
+		chainID: chainID,
+		// Create a queue for payloads, wrapped in a metrics buffer
+		payloads: &metricsBuffer{},
+		ledger:              ledger,
+		stateResponseCh:     make(chan protoext.ReceivedMessage, config.StateChannelSize),
+		stateRequestCh:      make(chan protoext.ReceivedMessage, config.StateChannelSize),
+		stopCh:              make(chan struct{}),
+		stateTransferActive: 0,
+		once:                sync.Once{},
+		stateMetrics:        stateMetrics,
+		requestValidator:    &stateRequestValidator{},
+		blockingMode:        blockingMode,
+		config:              config,
+	}
+    
     ...
     
     // 1.更新区块高度
@@ -162,7 +218,212 @@ func NewGossipStateProvider(
 }
 ```
 
-## 2.go s.deliverPayloads()
+## 
+
+# 5 将Block放到缓冲区
+
+## 1.拿到消息Chan-gossipChan
+
+gossip\state\state.go
+
+```go
+// to orchestrate arrival of private rwsets and blocks before committing them into the ledger.
+func NewGossipStateProvider(
+	logger util.Logger,
+	chainID string,
+	services *ServicesMediator,
+	ledger ledgerResources,
+	stateMetrics *metrics.StateMetrics,
+	blockingMode bool,
+	config *StateConfig,
+) GossipStateProvider {
+	gossipChan, _ := services.Accept(func(message interface{}) bool {
+		// Get only data messages
+		return protoext.IsDataMsg(message.(*proto.GossipMessage)) &&
+			bytes.Equal(message.(*proto.GossipMessage).Channel, []byte(chainID))
+	}, false)
+    
+    ...
+}
+```
+
+### 1.Node.Accept
+
+gossip\gossip\gossip_impl.go
+
+```go
+// Accept returns a dedicated read-only channel for messages sent by other nodes that match a certain predicate.
+// If passThrough is false, the messages are processed by the gossip layer beforehand.
+// If passThrough is true, the gossip layer doesn't intervene and the messages
+// can be used to send a reply back to the sender
+func (g *Node) Accept(acceptor common.MessageAcceptor, passThrough bool) (<-chan *pg.GossipMessage, <-chan protoext.ReceivedMessage) {
+	// 1如果是拿commChan则通过另外一种方法拿取
+    if passThrough {
+		return nil, g.comm.Accept(acceptor)
+	}
+    // 2设置回调函数，判单消息的类型
+	acceptByType := func(o interface{}) bool {
+		if o, isGossipMsg := o.(*pg.GossipMessage); isGossipMsg {
+			return acceptor(o)
+		}
+		if o, isSignedMsg := o.(*protoext.SignedGossipMessage); isSignedMsg {
+			sMsg := o
+			return acceptor(sMsg.GossipMessage)
+		}
+		g.logger.Warning("Message type:", reflect.TypeOf(o), "cannot be evaluated")
+		return false
+	}
+    // 3通过gossip node 拿到一个inCh
+	inCh := g.AddChannel(acceptByType)
+	outCh := make(chan *pg.GossipMessage, acceptChanSize)
+	go func() {
+		defer close(outCh)
+		for {
+			select {
+			case <-g.toDieChan:
+				return
+            // 1.如果inCh中来了新的数据
+			case m, channelOpen := <-inCh:
+				if !channelOpen {
+					return
+				}
+				select {
+				case <-g.toDieChan:
+					return
+                // 2.如果可以向outCh里面放数据
+				case outCh <- m.(*protoext.SignedGossipMessage).GossipMessage:
+				}
+			}
+		}
+	}()
+	return outCh, nil
+}
+```
+
+### 2.g.AddChannel
+
+gossip\comm\demux.go
+
+```go
+// AddChannel registers a channel with a certain predicate. AddChannel
+// returns a read-only channel that will produce values that are
+// matched by the predicate function.
+//
+// If the DeMultiplexer is closed, the channel returned will be closed
+// to prevent users of the channel from waiting on the channel.
+func (m *ChannelDeMultiplexer) AddChannel(predicate common.MessageAcceptor) <-chan interface{} {
+	m.lock.Lock()
+	if m.closed { // closed once, can't put anything more in.
+		m.lock.Unlock()
+		ch := make(chan interface{})
+		close(ch)
+		return ch
+	}
+	bidirectionalCh := make(chan interface{}, 10)
+	// Assignment to channel converts bidirectionalCh to send-only.
+	// Return converts bidirectionalCh to a receive-only.
+    // 添加一个channel
+	ch := &channel{ch: bidirectionalCh, pred: predicate} 
+	m.channels = append(m.channels, ch)
+	m.lock.Unlock()
+	return bidirectionalCh
+}
+
+```
+
+### 3.ChannelDeMultiplexer
+
+```go
+// ChannelDeMultiplexer is a struct that can receive channel registrations (AddChannel)
+// and publications (DeMultiplex) and it broadcasts the publications to registrations
+// according to their predicate. Can only be closed once and never open after a close.
+type ChannelDeMultiplexer struct {
+	// lock protects everything below it.
+	lock   sync.Mutex
+	closed bool // one way boolean from false -> true
+	stopCh chan struct{}
+	// deMuxInProgress keeps track of any calls to DeMultiplex
+	// that are still being handled. This is used to determine
+	// when it is safe to close all of the tracked channels
+	deMuxInProgress sync.WaitGroup
+	channels        []*channel
+}
+
+```
+
+
+
+## 2.go s.receiveAndQueueGossipMessages(gossipChan)
+
+将gossipChan中的数据放到缓冲区里
+
+gossip\state\state.go
+
+```go
+func (s *GossipStateProviderImpl) receiveAndQueueGossipMessages(ch <-chan *proto.GossipMessage) {
+	for msg := range ch {
+		s.logger.Debug("Received new message via gossip channel")
+		go func(msg *proto.GossipMessage) {
+			if !bytes.Equal(msg.Channel, []byte(s.chainID)) {
+				s.logger.Warning("Received enqueue for channel",
+					string(msg.Channel), "while expecting channel", s.chainID, "ignoring enqueue")
+				return
+			}
+
+			dataMsg := msg.GetDataMsg()
+			if dataMsg != nil {
+				if err := s.addPayload(dataMsg.GetPayload(), nonBlocking); err != nil {
+					s.logger.Warningf("Block [%d] received from gossip wasn't added to payload buffer: %v", dataMsg.Payload.SeqNum, err)
+					return
+				}
+
+			} else {
+				s.logger.Debug("Gossip message received is not of data message type, usually this should not happen.")
+			}
+		}(msg)
+	}
+}
+```
+
+### 1.GossipStateProviderImpl.addPayload
+
+gossip\state\state.go
+
+```go
+// addPayload adds new payload into state. It may (or may not) block according to the
+// given parameter. If it gets a block while in blocking mode - it would wait until
+// the block is sent into the payloads buffer.
+// Else - it may drop the block, if the payload buffer is too full.
+func (s *GossipStateProviderImpl) addPayload(payload *proto.Payload, blockingMode bool) error {
+	if payload == nil {
+		return errors.New("Given payload is nil")
+	}
+	s.logger.Debugf("[%s] Adding payload to local buffer, blockNum = [%d]", s.chainID, payload.SeqNum)
+	height, err := s.ledger.LedgerHeight()
+	if err != nil {
+		return errors.Wrap(err, "Failed obtaining ledger height")
+	}
+
+	if !blockingMode && payload.SeqNum-height >= uint64(s.config.StateBlockBufferSize) {
+		return errors.Errorf("Ledger height is at %d, cannot enqueue block with sequence of %d", height, payload.SeqNum)
+	}
+
+	for blockingMode && s.payloads.Size() > s.config.StateBlockBufferSize*2 {
+		time.Sleep(enqueueRetryInterval)
+	}
+
+    // 添加到缓冲区中
+	s.payloads.Push(payload)
+	s.logger.Debugf("Blocks payloads buffer size for channel [%s] is %d blocks", s.chainID, s.payloads.Size())
+	return nil
+}
+```
+
+
+
+# 6 Peer节点处理数据消息并提交账本
+
+## 1.go s.deliverPayloads()
 
 gossip\state\state.go
 
@@ -207,7 +468,7 @@ func (s *GossipStateProviderImpl) deliverPayloads() {
 }
 ```
 
-## 3.state.commitBlock
+## 2.state.commitBlock
 
 gossip\state\state.go
 

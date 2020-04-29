@@ -63,11 +63,24 @@ func (g *Node) handleMessage(m protoext.ReceivedMessage) {
 		return
 	}
 
+    // 1.IsChannelRestricted returns whether this GossipMessage should be routed only in its channel
 	if protoext.IsChannelRestricted(msg.GossipMessage) {
+        //1如果不是该通道中的消息，考虑到这条消息可能是state，仍然应该传给同org中的其他的peer
 		if gc := g.chanState.lookupChannelForMsg(m); gc == nil {
-			...
+			if g.IsInMyOrg(discovery.NetworkMember{PKIid: m.GetConnectionInfo().ID}) && protoext.IsStateInfoMsg(msg.GossipMessage) {
+				if g.stateInfoMsgStore.Add(msg) {
+					...
+				}
+			}
+            
+            ...
 		} else {
-			...
+        //2如果是该通道中的消息
+			if protoext.IsLeadershipMsg(m.GetGossipMessage().GossipMessage) {
+				if err := g.validateLeadershipMessage(m.GetGossipMessage()); err != nil {
+					return
+				}
+			}
 			gc.HandleMessage(m)
 		}
 		return
@@ -77,70 +90,11 @@ func (g *Node) handleMessage(m protoext.ReceivedMessage) {
 }
 ```
 
-## 4 gc.HandleMessage
 
-gossip\gossip\channel\channel.go
 
-```go
-// HandleMessage processes a message sent by a remote peer
-func (gc *gossipChannel) HandleMessage(msg protoext.ReceivedMessage) {
-	//前面是异常处理部分，在此省略
-    ...
-    
-	if protoext.IsStateInfoPullRequestMsg(m.GossipMessage) {
-		msg.Respond(gc.createStateInfoSnapshot(orgID))
-		return
-	}
+## 4 g.stateInfoMsgStore.Add
 
-	if protoext.IsStateInfoSnapshot(m.GossipMessage) {
-		gc.handleStateInfSnapshot(m.GossipMessage, msg.GetConnectionInfo().ID)
-		return
-	}
-
-    // 如果接收到的是data或者是stateinfo
-	if protoext.IsDataMsg(m.GossipMessage) || protoext.IsStateInfoMsg(m.GossipMessage) {
-		added := false
-		if protoext.IsDataMsg(m.GossipMessage) {
-			if m.GetDataMsg().Payload == nil {
-				return
-			}
-			// Would this block go into the message store if it was verified?
-			if !gc.blockMsgStore.CheckValid(msg.GetGossipMessage()) {
-				return
-			}
-            // 通过MCS消息加密服务模块验证该区块结构的合法性，以及区块元数据中的签名是否满足指定的区块验证策略BlockValidation。
-			if !gc.verifyBlock(m.GossipMessage, msg.GetConnectionInfo().ID) {
-				return
-			}
-            // 将DataMsg消息添加到blockMsgStore与blocksPuller消息存储对象上
-			gc.Lock()
-			added = gc.blockMsgStore.Add(msg.GetGossipMessage())
-			if added {
-                // blocksPuller对象周期性地发送Pull类数据消息，以拉取并更新本地节点账本上缺失的DataMsg消息
-				gc.blocksPuller.Add(msg.GetGossipMessage())
-			}
-			gc.Unlock()
-		} else { // StateInfoMsg verification should be handled in a layer above
-			//  since we don't have access to the id mapper here
-			added = gc.stateInfoMsgStore.Add(msg.GetGossipMessage())
-		}
-
-		if added {
-            // 将该DataMsg消息封装为emittedGossip-Message类型消息，添加到emitter模块缓冲区中，交由emitter模块打包并发送到组织内的其他Peer节点上。
-			// Forward the message
-			gc.Forward(msg)
-			// DeMultiplex to local subscribers
-			gc.DeMultiplex(m)
-		}
-		return
-	}
-
-    // 如果接收到的是pull
-	...
-}
-```
-
-## 5 gc.blockMsgStore.Add
+gossip\gossip\msgstore\msgs.go
 
 ```go
 // add adds a message to the store
@@ -167,7 +121,105 @@ func (s *messageStoreImpl) Add(message interface{}) bool {
 }
 ```
 
-## 6 gc.blocksPuller.Add
+
+
+## 5 gc.HandleMessage
+
+gossip\gossip\channel\channel.go
+
+```go
+// HandleMessage processes a message sent by a remote peer
+func (gc *gossipChannel) HandleMessage(msg protoext.ReceivedMessage) {
+	//前面是异常处理部分，在此省略
+    ...
+    
+    // 1.
+	if protoext.IsStateInfoPullRequestMsg(m.GossipMessage) {
+		msg.Respond(gc.createStateInfoSnapshot(orgID))
+		return
+	}
+
+    // 2.
+	if protoext.IsStateInfoSnapshot(m.GossipMessage) {
+		gc.handleStateInfSnapshot(m.GossipMessage, msg.GetConnectionInfo().ID)
+		return
+	}
+
+    // 3.如果接收到的是data或者是stateinfo
+	if protoext.IsDataMsg(m.GossipMessage) || protoext.IsStateInfoMsg(m.GossipMessage) {
+		added := false
+        // 1.如果接收到的是data
+		if protoext.IsDataMsg(m.GossipMessage) {
+			// 1.检查是否有data要存到缓冲区中
+            if m.GetDataMsg().Payload == nil {
+				return
+			}
+			// 2.Would this block go into the message store if it was verified?
+			if !gc.blockMsgStore.CheckValid(msg.GetGossipMessage()) {
+				return
+			}
+            // 3.通过MCS消息加密服务模块验证该区块结构的合法性，以及区块元数据中的签名是否满足指定的区块验证策略BlockValidation。
+			if !gc.verifyBlock(m.GossipMessage, msg.GetConnectionInfo().ID) {
+				return
+			}
+            // 4.将DataMsg消息添加到blockMsgStore与blocksPuller消息存储对象上
+			gc.Lock()
+			added = gc.blockMsgStore.Add(msg.GetGossipMessage())
+			if added {
+                // blocksPuller对象周期性地发送Pull类数据消息，以拉取并更新本地节点账本上缺失的DataMsg消息
+				gc.blocksPuller.Add(msg.GetGossipMessage())
+			}
+			gc.Unlock()
+		} else { 
+        // 2.如果接收到的是stateinfo
+            // StateInfoMsg verification should be handled in a layer above
+			//  since we don't have access to the id mapper here
+			added = gc.stateInfoMsgStore.Add(msg.GetGossipMessage())
+		}
+
+		if added {
+            // 将该DataMsg消息封装为emittedGossip-Message类型消息，添加到emitter模块缓冲区中，交由emitter模块打包并发送到组织内的其他Peer节点上。
+			// Forward the message
+			gc.Forward(msg)
+			// DeMultiplex to local subscribers
+			gc.DeMultiplex(m)
+		}
+		return
+	}
+
+    // 如果接收到的是pull
+	...
+}
+```
+
+## 6 gc.blockMsgStore.Add
+
+```go
+// add adds a message to the store
+func (s *messageStoreImpl) Add(message interface{}) bool {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	n := len(s.messages)
+	for i := 0; i < n; i++ {
+		m := s.messages[i]
+		switch s.pol(message, m.data) {
+		case common.MessageInvalidated:
+			return false
+		case common.MessageInvalidates:
+			s.invTrigger(m.data)
+			s.messages = append(s.messages[:i], s.messages[i+1:]...)
+			n--
+			i--
+		}
+	}
+
+	s.messages = append(s.messages, &msg{data: message, created: time.Now()})
+	return true
+}
+```
+
+## 7 gc.blocksPuller.Add
 
 blocksPuller对象周期性地发送Pull类数据消息，以拉取并更新本地节点账本上缺失的DataMsg消息
 
@@ -186,7 +238,7 @@ func (p *pullMediatorImpl) Add(msg *protoext.SignedGossipMessage) {
 }
 ```
 
-## 7 gc.Forward
+## 8 gc.Forward
 
 将该DataMsg消息封装为emittedGossip-Message类型消息，添加到emitter模块缓冲区中，交由emitter模块打包并发送到组织内的其他Peer节点上。
 
@@ -200,7 +252,7 @@ func (ga *gossipAdapterImpl) Forward(msg protoext.ReceivedMessage) {
 }
 ```
 
-## 8 gc.DeMultiplex
+## 9 gc.DeMultiplex
 
 ```go
 // DeMultiplex broadcasts the message to all channels that were returned
