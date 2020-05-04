@@ -2,8 +2,6 @@
 
 问题：peer节点接收到DataMsg之后，是怎么把blockMsgStore存到缓冲区中的？
 
-
-
 ## 0.入口
 
 什么时候开始存储区块的入口主要有两点，这里只涉及peer节点启动时的操作
@@ -218,7 +216,7 @@ func NewGossipStateProvider(
 }
 ```
 
-## 
+
 
 # 5 将Block放到缓冲区
 
