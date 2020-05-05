@@ -6,8 +6,6 @@ gossip\service\gossip_service.go
 
 InitializeChannel()
 
-**问题：**感觉前面的调用过程很复杂，不知道怎样就调用到了这里，完成该peer的gossip channel 部分的工作
-
 ```go
 // InitializeChannel allocates the state provider and should be invoked once per channel per execution
 func (g *GossipService) InitializeChannel(channelID string, ordererSource *orderers.ConnectionSource, store *transientstore.Store, support Support) {
@@ -46,11 +44,11 @@ func (g *GossipService) InitializeChannel(channelID string, ordererSource *order
 }
 ```
 
-## 2 newLeaderElectionComponent
+## 2 g.newLeaderElectionComponent
 
-1. newLeaderElectionComponent
+newLeaderElectionComponent
 
-   gossip\service\gossip_service.go
+gossip\service\gossip_service.go
 
 ```go
 func (g *GossipService) newLeaderElectionComponent(channelID string, callback func(bool),
@@ -60,9 +58,9 @@ func (g *GossipService) newLeaderElectionComponent(channelID string, callback fu
 }
 ```
 
-2. NewLeaderElectionService
+### 1.NewLeaderElectionService
 
-   gossip\election\election.go
+gossip\election\election.go
 
 ```go
 // NewLeaderElectionService returns a new LeaderElectionService
@@ -81,9 +79,9 @@ func NewLeaderElectionService(adapter LeaderElectionAdapter, id string, callback
 }
 ```
 
-3. le.start()
+### 2.le.start()
 
-   gossip\election\election.go
+gossip\election\election.go
 
 ```go
 func (le *leaderElectionSvcImpl) start() {
@@ -97,9 +95,11 @@ func (le *leaderElectionSvcImpl) start() {
 }
 ```
 
-## 3 le.start()-le.handleMessages()
+## 3 le.handleMessages()
 
-1. 判断接收到的是哪些消息
+判断接收到的是哪些消息
+
+gossip\election\election.go
 
 ```go
 func (le *leaderElectionSvcImpl) handleMessages() {
@@ -125,28 +125,39 @@ func (le *leaderElectionSvcImpl) handleMessages() {
 }
 ```
 
-2. 处理具体的关于election 的消息
+### 1.le.handleMessage(msg Msg)
+
+处理具体的关于election 的消息
+
+gossip\election\election.go
 
 ```go
 func (le *leaderElectionSvcImpl) handleMessage(msg Msg) {
-	
+	msgType := "proposal"
+    // 首先检查接收消息的类型，如果该消息是declaration消息，即声明消息发送节点是Leader主节点
+	if msg.IsDeclaration() {
+		msgType = "declaration"
+	}
+	le.logger.Debug(le.id, ":", msg.SenderID(), "sent us", msgType)
 	le.Lock()
 	defer le.Unlock()
 	
     // 1.如果是竞选消息
 	if msg.IsProposal() {
-        // 把发送者的id假如到集合中
+        // 将该消息发送节点的PKIID添加到proposals消息集合中并等待处理
 		le.proposals.Add(string(msg.SenderID()))
-	} else if msg.IsDeclaration() {
+	} else if msg.IsDeclaration() { // 测试是否声明当前节点是Leader主节点
 	// 2.如果是其他peer宣称已经为leader的消息
-        // 2.1将该节点的le状态调整为leader存在状态
+        // 2.1将该节点的le状态调整为leader存在状态，表明已经存在Leader主节点
         atomic.StoreInt32(&le.leaderExists, int32(1))
-        // 2.2如果在sleeping状态则向interruptChan中放一个空的结构体
+        // 2.2如果election选举模块处于休眠状态中（le.sleeping标志位为true），并且interruptChan通道中不存在中断消息。
 		if le.sleeping && len(le.interruptChan) == 0 {
-			le.interruptChan <- struct{}{}
+			// 发送空结构struct{}{}到le.interruptChan通道，作为信号唤醒election选举模块，并重新参与竞争Leader主节点
+            le.interruptChan <- struct{}{}
 		}
-        // 2.3如果发送者的id比自己的id小，且network中已经存在了leader，则该节点放弃竞选leader
+        // 2.3如果发送者的id比自己的id小，并且当前节点声明为Leader主节点
 		if bytes.Compare(msg.SenderID(), le.id) < 0 && le.IsLeader() {
+            // 消息发送者自动成为Leader主节点，当前节点放弃竞争Leader主节点。
 			le.stopBeingLeader()
 		}
 	} else {
@@ -156,13 +167,9 @@ func (le *leaderElectionSvcImpl) handleMessage(msg Msg) {
 }
 ```
 
-3. 放弃竞选leader
+### 2.le.stopBeingLeader
 
-   下面的这些地方没有找到具体的地方在哪...
-
-   调用le.callback(false)→gossipService-Impl.onStatusChangeFactory()回调方法，停止当前节点请求区块的Deliver服务实例broadcastClient客户端，并删除关联的区块提供者BlocksProvider结构键值对，设置其b.done标志位为1。
-
-   这样，使得区块提供者在DeliverBlocks()方法中跳出消息处理循环，转换为普通节点并从其他节点接收区块。
+放弃竞选leader
 
 ```go
 func (le *leaderElectionSvcImpl) stopBeingLeader() {
@@ -172,11 +179,50 @@ func (le *leaderElectionSvcImpl) stopBeingLeader() {
 }
 ```
 
+#### 1.callback的定义
 
+1. 回调函数是在初始化选举模块时定义的(第2部分已经传进来了)，其中回调函数为g.onStatusChangeFactory
 
+   gossip\service\gossip_service.go
 
+```go
+g.leaderElection[channelID] = g.newLeaderElectionComponent(channelID, g.onStatusChangeFactory(channelID,
+				support.Committer), g.metrics.ElectionMetrics)
+```
 
-## 4 le.start()-le.waitForMembershipStabilization
+2. g.onStatusChangeFactory
+
+   gossip\service\gossip_service.go
+
+   停止当前节点请求区块的Deliver服务实例broadcastClient客户端，并删除关联的区块提供者BlocksProvider结构键值对，设置其b.done标志位为1。
+
+   这样，使得区块提供者在DeliverBlocks()方法中跳出消息处理循环，转换为普通节点并从其他节点接收区块。
+
+```go
+func (g *GossipService) onStatusChangeFactory(channelID string, committer blocksprovider.LedgerInfo) func(bool) {
+	return func(isLeader bool) {
+		if isLeader {
+			yield := func() {
+				g.lock.RLock()
+				le := g.leaderElection[channelID]
+				g.lock.RUnlock()
+				le.Yield()
+			}
+			logger.Info("Elected as a leader, starting delivery service for channel", channelID)
+			if err := g.deliveryService[channelID].StartDeliverForChannel(channelID, committer, yield); err != nil {
+				logger.Errorf("Delivery service is not able to start blocks delivery for chain, due to %+v", err)
+			}
+		} else {
+			logger.Info("Renounced leadership, stopping delivery service for channel", channelID)
+			if err := g.deliveryService[channelID].StopDeliverForChannel(channelID); err != nil {
+				logger.Errorf("Delivery service is not able to stop blocks delivery for chain, due to %+v", err)
+			}
+		}
+	}
+}
+```
+
+## 4 le.waitForMembershipStabilization
 
 1. 在一段时间内，等待网络成员的关系不发生变化，即网络稳定时
 
@@ -191,7 +237,7 @@ func (le *leaderElectionSvcImpl) waitForMembershipStabilization(timeLimit time.D
 		// 3.拿到网络中新的成员
         newSize := len(le.adapter.Peers())
 		// 4.通过成员的数量判断网络结构是否发生了变化，如果成员结构不再发生变化
-        if newSize == viewSize || time.Now().After(endTime) || le.isLeaderExists() {
+        if newSize == viewSize || time.Now().After(endTime) ||le.isLeaderExists() {
 			return
 		}
 		viewSize = newSize
@@ -199,9 +245,11 @@ func (le *leaderElectionSvcImpl) waitForMembershipStabilization(timeLimit time.D
 }
 ```
 
-2. 获取网络中peer成员
+### 1.le.adapter.Peers
 
-   gossip\election\adapter.go
+获取网络中peer成员
+
+gossip\election\adapter.go
 
 ```go
 func (ai *adapterImpl) Peers() []Peer {
@@ -219,9 +267,11 @@ func (ai *adapterImpl) Peers() []Peer {
 
 ```
 
-3. 拿到channel中的成员
+### 2.ai.gossip.PeersOfChannel
 
-   gossip\gossip\gossip_impl.go
+拿到channel中的成员
+
+gossip\gossip\gossip_impl.go
 
 ```go
 // PeersOfChannel returns the NetworkMembers considered alive
@@ -233,11 +283,7 @@ func (g *Node) PeersOfChannel(channel common.ChannelID) []discovery.NetworkMembe
 }
 ```
 
-
-
-
-
-## 5 le.start()-le.run()
+## 5 le.run()
 
 ```go
 func (le *leaderElectionSvcImpl) run() {
@@ -319,10 +365,6 @@ func (le *leaderElectionSvcImpl) leaderElection() {
 - 实际上调用了election模块初始化时传入的onStatusChangeFactory()方法参数（service/gossip_service.go）。
 - 参数为true则意味着将当前节点转换为Leader主节点，并启动该节点的Deliver服务实例，代表组织负责从Orderer服务节点请求获取通道账本数据。
 - 然后，设置le.leaderExists标志位为1，以标识当前节点为Leader主节点。
-
-**问：**
-
-- **这个地方的回调函数在哪里找啊，都做了什么？**
 
 ```go
 func (le *leaderElectionSvcImpl) beLeader() {

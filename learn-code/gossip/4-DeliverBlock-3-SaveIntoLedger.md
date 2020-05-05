@@ -351,9 +351,9 @@ type ChannelDeMultiplexer struct {
 
 
 
-## 2.go s.receiveAndQueueGossipMessages(gossipChan)
+## 2.go s.receiveAndQueueGossipMessages
 
-将gossipChan中的数据放到缓冲区里
+接收来自gossipChan通道的DataMsg类型数据消息，并添加到指定通道上payloads模块（PayloadsBufferImpl类型）的消息负载缓冲区中，等待处理并提交账本
 
 gossip\state\state.go
 
@@ -362,14 +362,16 @@ func (s *GossipStateProviderImpl) receiveAndQueueGossipMessages(ch <-chan *proto
 	for msg := range ch {
 		s.logger.Debug("Received new message via gossip channel")
 		go func(msg *proto.GossipMessage) {
+            // 1.检查消息中的通道ID与state模块的通道ID是否一致
 			if !bytes.Equal(msg.Channel, []byte(s.chainID)) {
 				s.logger.Warning("Received enqueue for channel",
 					string(msg.Channel), "while expecting channel", s.chainID, "ignoring enqueue")
 				return
 			}
-
+			// 2.提取出DataMsg消息dataMsg
 			dataMsg := msg.GetDataMsg()
 			if dataMsg != nil {
+                // 3.将该消息负载以非阻塞的方式添加到payloads模块的本地消息负载缓冲区buf（map[uint64]*proto.Payload）中
 				if err := s.addPayload(dataMsg.GetPayload(), nonBlocking); err != nil {
 					s.logger.Warningf("Block [%d] received from gossip wasn't added to payload buffer: %v", dataMsg.Payload.SeqNum, err)
 					return
@@ -396,13 +398,11 @@ func (s *GossipStateProviderImpl) addPayload(payload *proto.Payload, blockingMod
 	if payload == nil {
 		return errors.New("Given payload is nil")
 	}
-	s.logger.Debugf("[%s] Adding payload to local buffer, blockNum = [%d]", s.chainID, payload.SeqNum)
+	
 	height, err := s.ledger.LedgerHeight()
-	if err != nil {
-		return errors.Wrap(err, "Failed obtaining ledger height")
-	}
-
-	if !blockingMode && payload.SeqNum-height >= uint64(s.config.StateBlockBufferSize) {
+	
+	// 根据阻塞方式blockingMode参数，对超出预定数量的消息负载进行分类处理
+	if !blockingMode && payload.SeqNum - height >= uint64(s.config.StateBlockBufferSize) {
 		return errors.Errorf("Ledger height is at %d, cannot enqueue block with sequence of %d", height, payload.SeqNum)
 	}
 
@@ -410,10 +410,43 @@ func (s *GossipStateProviderImpl) addPayload(payload *proto.Payload, blockingMod
 		time.Sleep(enqueueRetryInterval)
 	}
 
-    // 添加到缓冲区中
+    // 保存到消息负载缓冲区中，并等待提交账本
 	s.payloads.Push(payload)
 	s.logger.Debugf("Blocks payloads buffer size for channel [%s] is %d blocks", s.chainID, s.payloads.Size())
 	return nil
+}
+```
+
+### 2.PayloadsBufferImpl.Push
+
+gossip\state\payloads_buffer.go
+
+```go
+// Push new payload into the buffer structure in case new arrived payload
+// sequence number is below the expected next block number payload will be
+// thrown away.
+// TODO return bool to indicate if payload was added or not, so that caller can log result.
+func (b *PayloadsBufferImpl) Push(payload *proto.Payload) {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	// 获取消息负载序号
+	seqNum := payload.SeqNum
+	
+    // 检查消息负载的区块号seqNum是否符合如下要求，next是指期望等待提交账本的下一个区块号
+	// 检查区块号是否小于next，或者是否被处理过
+    if seqNum < b.next || b.buf[seqNum] != nil {
+		b.logger.Debugf("Payload with sequence number = %d has been already processed", payload.SeqNum)
+		return
+	}
+	// 保存到消息负载缓冲区
+	b.buf[seqNum] = payload
+
+	// Send notification that next sequence has arrived
+	// 通知已经接收到期望的下一个区块的序号next
+    if seqNum == b.next && len(b.readyChan) == 0 {
+        // 将空结构struct{}{}作为信号消息发送到payloads模块的readyChan通道中，解除阻塞当前goroutine执行
+		b.readyChan <- struct{}{}
+	}
 }
 ```
 
@@ -427,27 +460,31 @@ gossip\state\state.go
 
 ```go
 func (s *GossipStateProviderImpl) deliverPayloads() {
+    // 消息处理循环并使用select语句阻塞等待通道消息
 	for {
 		select {
-        // 如果缓冲区接收到了block
+        // 等待新的消息负载，缓冲区接收到了block
 		// Wait for notification that next seq has arrived
-		case <-s.payloads.Ready():
-			
+		case <-s.payloads.Ready(): // return s.payloads.readyChan
 			// 1.Collect all subsequent payloads
+            // 取出消息负载
 			for payload := s.payloads.Pop(); payload != nil; payload = s.payloads.Pop() {
 				rawBlock := &common.Block{}
-                // 2.拿到block
+                // 2.解析到区块Block结构对象
 				if err := pb.Unmarshal(payload.Data, rawBlock); err != nil {
 					s.logger.Errorf("Error getting block with seqNum = %d due to (%+v)...dropping block", payload.SeqNum, errors.WithStack(err))
 					continue
 				}
-								
-				// 3.拿到私有数据
+                
+                // 检查区块结构的合法性
+				...
+                
+				// 3.解析隐私数据到消息负载的PrivateData列表中
                 // Read all private data into slice
 				var p util.PvtDataCollections
 				if payload.PrivateData != nil {
+                    // 将payload.PrivateData解析为PvtDataCollections结构对象p
 					err := p.Unmarshal(payload.PrivateData)
-					
 				}
                 // 4.将私有数据和block一同提交到账本中
 				if err := s.commitBlock(rawBlock, p); err != nil {
@@ -458,6 +495,7 @@ func (s *GossipStateProviderImpl) deliverPayloads() {
 					
 				}
 			}
+        // 停止state模块运行
 		case <-s.stopCh:
 			s.logger.Debug("State provider has been stopped, finishing to push new blocks.")
 			return
@@ -486,6 +524,12 @@ func (s *GossipStateProviderImpl) commitBlock(block *common.Block, pvtData util.
 	s.stateMetrics.CommitDuration.With("channel", s.chainID).Observe(sinceT1.Seconds())
 
 	// 3.Update ledger height
+    /*
+    UpdateLedgerHeight()方法先根据通道chainID获取指定的GossipChannel通道对象gc。
+    接着，调用GossipChannel对象的gc.UpdateStateInfo()方法，更新通道状态信息stateInfMsg到指定通道上的state-InfoMsgStore消息存储对象，并更新该通道的账本高度ledgerHeight与状态信息消息state-InfoMsg。然后，设置shouldGossipStateInfo更新标志位为1，表示该GossipChannel通道对象的stateInfMsg状态信息消息存在更新，需要发布给其他节点。
+    同时，GossipChannel通道对象会周期性地调用gc.publishStateInfo()方法以检查shouldGossipStateInfo标志位。如果发现该标志位为1，则调用gc.Gossip(stateInfoMsg)方法，发送当前通道的stateInfoMsg消息给其他节点进行更新。
+    发送结束后，如果还存在其他的存活成员节点，则设置should-GossipStateInfo标志位为0，以停止更新操作，等待下次调用UpdateStateInfo()方法时再次打开标志位。
+    */
 	s.mediator.UpdateLedgerHeight(block.Header.Number+1, common2.ChannelID(s.chainID))
 	s.stateMetrics.Height.With("channel", s.chainID).Set(float64(block.Header.Number + 1))
 
@@ -502,7 +546,7 @@ gossip\privdata\coordinator.go
 func (c *coordinator) StoreBlock(block *common.Block, privateDataSets util.PvtDataCollections) error {
 	
 	validationStart := time.Now()
-    // 1.验证block的有效性
+    // 1.利用Committer功能模块验证交易block的有效性
 	err := c.Validator.Validate(block)
 	c.reportValidationDuration(time.Since(validationStart))
 
@@ -524,22 +568,7 @@ func (c *coordinator) StoreBlock(block *common.Block, privateDataSets util.PvtDa
 	fetchDurationHistogram := c.metrics.FetchDuration.With("channel", c.ChainID)
 	purgeDurationHistogram := c.metrics.PurgeDuration.With("channel", c.ChainID)
 	pdp := &PvtdataProvider{
-		mspID:                                   c.mspID,
-		selfSignedData:                          c.selfSignedData,
-		logger:                                  logger.With("channel", c.ChainID),
-		listMissingPrivateDataDurationHistogram: listMissingPrivateDataDurationHistogram,
-		fetchDurationHistogram:                  fetchDurationHistogram,
-		purgeDurationHistogram:                  purgeDurationHistogram,
-		transientStore:                          c.store,
-		pullRetryThreshold:                      c.pullRetryThreshold,
-		prefetchedPvtdata:                       privateDataSets,
-		transientBlockRetention:                 c.transientBlockRetention,
-		channelID:                               c.ChainID,
-		blockNum:                                block.Header.Number,
-		storePvtdataOfInvalidTx:                 c.Support.CapabilityProvider.Capabilities().StorePvtDataOfInvalidTx(),
-		skipPullingInvalidTransactions:          c.skipPullingInvalidTransactions,
-		fetcher:                                 c.Fetcher,
-		idDeserializerFactory:                   c.idDeserializerFactory,
+		...
 	}
     
     // 5.
