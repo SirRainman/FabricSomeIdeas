@@ -6,6 +6,60 @@ Gossip消息模块引入反熵算法，用于解决网络延迟等原因造成�
 
 ## 1.入口-gossip 通道初始化
 
+1. GossipService.InitializeChannel
+
+   gossip\service\gossip_service.go
+
+```go
+// InitializeChannel allocates the state provider and should be invoked once per channel per execution
+func (g *GossipService) InitializeChannel(channelID string, ordererSource *orderers.ConnectionSource, store *transientstore.Store, support Support) {
+	
+	g.chains[channelID] = state.NewGossipStateProvider(
+		flogging.MustGetLogger(util.StateLogger),
+		channelID,
+		servicesAdapter,
+		coordinator,
+		g.metrics.StateMetrics,
+		blockingMode,
+		stateConfig)
+}
+```
+
+2. NewGossipStateProvider
+
+   gossip\state\state.go
+
+```go
+// NewGossipStateProvider creates state provider with coordinator instance
+// to orchestrate arrival of private rwsets and blocks before committing them into the ledger.
+func NewGossipStateProvider(
+	logger util.Logger,
+	chainID string,
+	services *ServicesMediator,
+	ledger ledgerResources,
+	stateMetrics *metrics.StateMetrics,
+	blockingMode bool,
+	config *StateConfig,
+) GossipStateProvider {
+	
+    ...
+    
+	// Listen for incoming communication
+	go s.receiveAndQueueGossipMessages(gossipChan)
+	go s.receiveAndDispatchDirectMessages(commChan)
+	// Deliver in order messages into the incoming channel
+	go s.deliverPayloads()
+	if s.config.StateEnabled {
+		// Execute anti entropy to fill missing gaps
+		go s.antiEntropy()
+	}
+	// Taking care of state request messages
+	go s.processStateRequests()
+
+	return s
+}
+```
+
 Gossip通道初始化后，会执行go s.antiEntropy()开启反熵线程
 
 ## 2.反熵算法
@@ -50,7 +104,7 @@ func (s *GossipStateProviderImpl) antiEntropy() {
 
 # 1 获取当前最大的账本高度
 
-## 1.maxAvailableLedgerHeight
+## 1.s.maxAvailableLedgerHeight
 
 gossip\state\state.go
 
