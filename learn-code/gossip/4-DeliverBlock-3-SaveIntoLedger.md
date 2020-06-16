@@ -395,9 +395,7 @@ gossip\state\state.go
 // the block is sent into the payloads buffer.
 // Else - it may drop the block, if the payload buffer is too full.
 func (s *GossipStateProviderImpl) addPayload(payload *proto.Payload, blockingMode bool) error {
-	if payload == nil {
-		return errors.New("Given payload is nil")
-	}
+	...
 	
 	height, err := s.ledger.LedgerHeight()
 	
@@ -453,6 +451,52 @@ func (b *PayloadsBufferImpl) Push(payload *proto.Payload) {
 
 
 # 6 Peer节点处理数据消息并提交账本
+
+前面的工作已经把收到的消息添加到了缓冲区中，这一部分的工作就是把缓冲区中的消息取出来，存储到文件中，也就是`go s.deliverPayloads()`
+
+gossip\state\state.go
+
+```go
+// NewGossipStateProvider creates state provider with coordinator instance
+// to orchestrate arrival of private rwsets and blocks before committing them into the ledger.
+func NewGossipStateProvider(
+	logger util.Logger,
+	chainID string,
+	services *ServicesMediator,
+	ledger ledgerResources,
+	stateMetrics *metrics.StateMetrics,
+	blockingMode bool,
+	config *StateConfig,
+) GossipStateProvider {
+    
+    ...
+    
+    // 1.更新区块高度
+	services.UpdateLedgerHeight(height, common2.ChannelID(s.chainID))
+
+	// 2.Listen for incoming communication
+	go s.receiveAndQueueGossipMessages(gossipChan)
+	// 3.接收和转发消息
+    go s.receiveAndDispatchDirectMessages(commChan)
+	
+    // 4.从缓冲区中读取数据并存到区块中
+    // Deliver in order messages into the incoming channel
+	go s.deliverPayloads()
+	
+    // 5.反熵函数--判断是否pull的机制
+    if s.config.StateEnabled {
+		// Execute anti entropy to fill missing gaps
+		go s.antiEntropy()
+	}
+	
+    // 6.Taking care of state request messages
+	go s.processStateRequests()
+
+	return s
+}
+```
+
+
 
 ## 1.go s.deliverPayloads()
 
@@ -571,10 +615,11 @@ func (c *coordinator) StoreBlock(block *common.Block, privateDataSets util.PvtDa
 		...
 	}
     
-    // 5.
+    // 5.拿到tx中的私有数据
 	pvtdataToRetrieve, err := c.getTxPvtdataInfoFromBlock(block)
 	
 	// 6.Retrieve the private data.
+    // 有权限才可以拿到数据
 	// RetrievePvtdata checks this peer's eligibility and then retreives from cache, transient store, or from a remote peer.
 	retrievedPvtdata, err := pdp.RetrievePvtdata(pvtdataToRetrieve)
 	blockAndPvtData.PvtData = retrievedPvtdata.blockPvtdata.PvtData
@@ -641,7 +686,7 @@ func (l *kvLedger) CommitLegacy(pvtdataAndBlock *ledger.BlockAndPvtData, commitO
 		pvtdataAndBlock.PvtData = convertTxPvtDataArrayToMap(txPvtData)
 	}
 
-    // 2.ValidateAndPrepare
+    // 2.Validate And Prepare
 	logger.Debugf("[%s] Validating state for block [%d]", l.ledgerID, blockNo)
 	txstatsInfo, updateBatchBytes, err := l.txtmgmt.ValidateAndPrepare(pvtdataAndBlock, true)
 	
@@ -649,7 +694,7 @@ func (l *kvLedger) CommitLegacy(pvtdataAndBlock *ledger.BlockAndPvtData, commitO
 
 	startBlockstorageAndPvtdataCommit := time.Now()
     
-    // 3.addBlockCommitHash
+    // 3.add Block Commit Hash
 	logger.Debugf("[%s] Adding CommitHash to the block [%d]", l.ledgerID, blockNo)
 	// we need to ensure that only after a genesis block, commitHash is computed
 	// and added to the block. In other words, only after joining a new channel
@@ -708,7 +753,7 @@ func (s *Store) CommitWithPvtData(blockAndPvtdata *ledger.BlockAndPvtData) error
 	s.rwlock.Lock()
 	defer s.rwlock.Unlock()
 
-    // 1.
+    // 1.拿到最近的账本高度
 	pvtBlkStoreHt, err := s.pvtdataStore.LastCommittedBlockHeight()
 	if pvtBlkStoreHt < blockNum+1 { // The pvt data store sanity check does not allow rewriting the pvt data.
 		// when re-processing blocks (rejoin the channel or re-fetching last few block),
@@ -786,7 +831,7 @@ func (mgr *blockfileMgr) addBlock(block *common.Block) error {
 		)
 	}
     
-    // 1.serializeBlock
+    // 1.serialize Block
 	blockBytes, info, err := serializeBlock(block)
 	
 	blockHash := protoutil.BlockHeaderHash(block.Header)
