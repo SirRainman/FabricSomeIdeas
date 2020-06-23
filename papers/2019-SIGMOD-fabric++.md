@@ -1,15 +1,12 @@
-读论文遇到的问题：
-
-1. 为什么相较于以太坊，fabric更加的“并行”？
-2. 为什么作者说以太坊的扩展性不高？
-
 # Background
+
+论文名称：Blurring the Lines between Blockchains and Database Systems: the Case of Hyperledger Fabric
 
 德国沙尔大学---大数据实验室：[实验室官网](https://bigdata.uni-saarland.de/research/research.php)
 
-- 计算机科学系是全德国最好的四个计算机科学系之一。
+- 计算机科学系是德国最好的四个计算机科学系之一。
 - 论文发表情况：SIGMOD 2019, SIGKDD 2019, SIGMOD 2018 * 2, ICDE 2018, VLDB 2017
-- 研究方向大致为：数据库（最大），机器学习，区块链
+- 研究方向大致为：数据库（比重最大），机器学习，区块链
 
 实验室研究主题：更快的处理大数据。
 
@@ -19,7 +16,7 @@
 
 # Introduction
 
-总体来讲，这是对Hyperledger Fabric区块链系统中吞吐量上的优化。
+总体来讲，这篇论文的工作是对Hyperledger Fabric系统中吞吐量上的优化。
 
 ## Hyperledger Fabric 面临的问题 ？
 
@@ -40,7 +37,7 @@ Fabric中并不是所有的客户端发起的交易顺利入链，当遇到高�
 
 ---
 
-## Fabric 如何处理的交易？
+## Fabric 如何处理交易？
 
 ![](../images/fabric-workflow.png)
 
@@ -178,4 +175,34 @@ phase within a peer. With such a mechanism at hand,we have the chance of identif
 
 ## Early Abort in the Ordering Phase
 
-除去在reorder阶段删掉强连通图中的交易之外，如果在一个区块中含有两笔对同一键值进行读取的交易，则检查这两笔交易中的键值的版本号，如果不同则抛弃排在后面的那个交易。
+除去在reorder阶段删掉强连通图中的交易之外，如果在一个区块中含有两笔对同一键值进行读取的交易，则检查这两笔交易中的键值的版本号，如果不同则抛弃排在后面(可选)的那个交易。
+
+| Transactions | Key/version |
+| :----------: | :---------: |
+|      T1      |    K1/V3    |
+|      T2      |    K3/V1    |
+|  **~~T3~~**  |  **K1/V2**  |
+
+# 测试结果
+
+| Terminology |                        Meaning                        |
+| :---------: | :---------------------------------------------------: |
+|     BS      |                      block size                       |
+|     RW      | the number of read & written balances per transaction |
+|     HR      | the probability for picking a hot account for reading |
+|     HW      | the probability for picking a hot account for writing |
+|     HSS     |          the number of hot account balances           |
+
+![](../images/fabric++-test-result1.png)
+
+![](../images/fabric++-test-result2.png)
+
+# 读论文中的一些疑问：
+
+1. 测试使用的是自己的测试框架，并没有使用官方的测试框架（如Caliper）
+2. 对模拟和验证阶段的锁进行修改后，会不会影响系统的正常的工作？
+3. 相较于“以增量的形式对同一个Key进行写入的多笔不同交易来写入数据”的这个方案，在orderer那里重新排序的优势与劣势在哪里？
+4. early abort之后怎么将失败的结果反馈给client？
+5. 为什么相较于以太坊，fabric更加的“并行”？simulate - order - validate - commit
+6. 为什么作者说以太坊的扩展性不高？
+
