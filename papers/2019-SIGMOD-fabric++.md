@@ -162,8 +162,7 @@ Fabric中并不是所有的客户端发起的交易顺利入链，当遇到高�
 
 
 
-To realize early abort in the simulation phase, we first have to extend Fabric by a more fine-grained concurrency control mechanism, that allows for the parallel execution of simulation and validation
-phase within a peer. With such a mechanism at hand,we have the chance of identifying stale reads during the simulation already.
+To realize early abort in the simulation phase, we first have to extend Fabric by a more fine-grained concurrency control mechanism, that allows for the parallel execution of simulation and validation phase within a peer. With such a mechanism at hand,we have the chance of identifying stale reads during the simulation already.
 
 作者设计了一种机制，模拟和验证可以同时进行。
 
@@ -202,6 +201,8 @@ phase within a peer. With such a mechanism at hand,we have the chance of identif
 1. 测试使用的是自己的测试框架，并没有使用官方的测试框架（如Caliper）
 2. 对模拟和验证阶段的锁进行修改后，会不会影响系统的正常的工作？
 3. 相较于“以增量的形式对同一个Key进行写入的多笔不同交易来写入数据”的这个方案，在orderer那里重新排序的优势与劣势在哪里？
+   1. 优势：不会有双花问题，如果对同一个键值进行增量的方式添加交易，增量的方式可能会存在双花问题。
+   2. 劣势：每次在ordering的阶段，orderer都得重新的读取每笔交易的读写集，并进行排序，会浪费大量的时间
 4. early abort之后怎么将失败的结果反馈给client？
 5. 为什么相较于以太坊，fabric更加的“并行”？simulate - order - validate - commit
 6. 为什么作者说以太坊的扩展性不高？
