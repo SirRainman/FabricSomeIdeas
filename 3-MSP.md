@@ -1,18 +1,20 @@
 # 什么是MSP？
 
+MSP定义的是一组规则，它规定了一些身份是可以被区块链网络的其他参与者信任的。并不是你有身份就可以参与到区块链网络中，MSP列举了哪些member可以参与到区块链网络（Channel, org, etc.）中。
+
+即：MSP完成的是用户的权限管理的功能。
+
 **MSP和CA之间的关系：**
 
-- CA产生代表用身份的identity，MSP则包含的是一组permissioned identity。（按我的理解就是MSP决定了哪些identity是permissioned）。也就是说每个identity都一个role，他不能干role规定之外的事。
-- MSP由CA创建，CA专门为组织创建证书和MSP。（这句话的源头：[设置排序节点：创建组织连接](https://hyperledger-fabric.readthedocs.io/zh_CN/release-2.0/orderer_deploy.html)）
+- CA产生代表用身份的identity，MSP则定义了一组permissioned identity是可以合法参与到区块链网络中的。（按我的理解就是MSP决定了哪些identity是permissioned）。
+- 除此之外，MSP可以给一个identity赋予一些权限，说白了MSP就是管理了一些具有某些权限的permissioned identity列表。比如每个人都有一个身份证，但是这并不代表你有参与人民代表大会的权利，而MSP维护了一个可参与人民代表大会的permissioned identity list。
+  - 在用户向CA请求一个证书的时候，必须制定好该用户的权限/角色，client? admin? peer? orderer? 
+- MSP由CA创建，CA专门为组织创建证书和MSP。（这句话的源头：[设置排序节点：创建组织连接](https://hyperledger-fabric.readthedocs.io/zh_CN/latest/orderer_deploy.html)）
 
 MSP 能够通过列举member的identity的方式来识别：哪些root CA 和intermediate CA可以定义一个域内的可信成员member
 
 * 原文：The MSP identifies which Root CAs and Intermediate CAs are accepted to define the members of a trust domain by listing the identities of their members。
 * MSP也可以识别哪些CA有权利给member发放有效力的证书。
-
-MSP列举了哪些member可以参与到区块链网络（Channel, org, etc.）中。
-
-MSP可以给一个identity赋予一些权限，说白了MSP就是管理了一些具有某些权限的permissioned identity列表。比如每个人都有一个身份证，但是这并不代表你有参与人民代表大会的权利，而MSP维护了一个可参与人民代表大会的permissioned identity list。
 
 
 
@@ -30,26 +32,28 @@ MSP可以给一个identity赋予一些权限，说白了MSP就是管理了一些
 - CA类似于银行的角色，他负责发行银行卡；
 - MSP类似政府财政部门，负责管理该商店只能用哪些银行卡进行支付。
 
-假如你要假如到fabric区块链中，MSP能够是你参与到permissioned 区块链中：
- 1. 首先你要有一个由CA颁发的identity
- 2. 成为某一个Org的一个member，你需要被链上的其他成员认可。MSP就是怎样将你的identity链接到该组织的membership中的一种技术。通过将member的公钥添加到org的MSP中，实现membership。（The MSP is how the identity is linked to the membership of an organization. Membership is achieved by adding the member’s public key (also known as certificate, signing cert, or signcert) to the organization’s MSP.）
- 3. 将MSP要么添加到consortium中，要么添加到channel中。
- 4. 确保MSP包含在了网络中的policy definition里。
+
+
+假如你要假如到fabric区块链中，MSP能够是你参与到permissioned 区块链中的组件：
+
+ 1. 首先你要有一个 被区块链网络所信任的CA 颁发的identity证书。
+  2. 成为某一个Org的一个member，你需要被链上的其他成员认可，需要将你的身份变成可以参与到区块链网络中的合法身份。
+     - MSP就是怎样将你的identity身份证书 链接到该组织的membership（该组织的会员）中的一种技术。通过将member的公钥添加到org的MSP中，实现membership。
+     - （The MSP is how the identity is linked to the membership of an organization. Membership is achieved by adding the member’s public key (also known as certificate, signing cert, or signcert) to the organization’s MSP.）
+  3. 将MSP要么添加到consortium中，要么添加到channel中。
+  4. 确保MSP包含在了网络中的policy definition里。
 
 
 
 # MSP domains
 
-MSP在区块链网络中的两个domain（译为层次？）出现，主要体现在作用域的不同。
+在区块链网络中，MSP主要出现在两个不同的地方，并不是这两个MSP有不同的作用，他们都可以将identities证书赋予相应的role角色，而是说他们的作用域不同
 
-* Local MSP: locally on an actor's node(能够管理一个节点的一些权限？)
-* Channel MSP: in channel configuration（能够管理一个channel的配置信息？）
-
-
-
-每个节点的信任域（例如组织）由节点的本地 MSP（例如 ORG1 或 ORG2）定义。
-
-**通过将组织的 MSP 添加到通道配置中，可以表示该组织加入了通道。**
+* Local MSP 参与者本地中: 为节点（peer 或 orderer）和用户（使用CLI或使用SDK的客户端应用程序的管理员）定义的。每一个peer orderer都必须有一个local msp，因为他们必须会有相应的权限，以便在加入区块链的时候，进行权限验证。。
+* Channel MSP 通道配置中: 定义的是通道级别的管理员权限 / 或者其他的权限。参与Channel的每个组织，都必须为其定义MSP。
+  * Channel MSP包含加入通道的所有组织的MSP信息。Channel MSP上的Peers 和 orderers将在Channel上共享数据，并且此后将能够正确认证Channel参与者。这意味着如果一个组织希望加入该Channel，那么需要在该Channel配置中，加入一个包含该组织成员的信任链的MSP。否则来自该组织身份的交易将被拒绝。
+  * **实际上，**Channel MSP在channel中的每个节点的文件系统上,实例化并且通过共识保持同步**。也就是说**，Channel通道中的每个节点的本地文件系统上存着每个channel MSP的副本。但从逻辑上来看，channel MSP驻留在channel或网络上并由其维护。Channel MSP的存在，使得加入通道中的所有节点之间的数据共享。
+  * **通过将组织的 MSP 添加到通道配置中，可以表示该组织加入了通道。**
 
 下图为区块链管理员安装和实例化智能合约时所发生的情况，通道由 ORG1 和 ORG2 管理。
 
@@ -79,16 +83,18 @@ MSP在区块链网络中的两个domain（译为层次？）出现，主要体�
 Local MSP 是为client，和node（peer 和 orderer）设计的：
 
 - 节点本地 MSP 为该节点定义权限（例如，是否具有管理员权限）。
-- 用户的本地 MSP 允许用户端在其交易中作为通道的成员（例如在链码交易中）或作为系统中特定角色的所有者（例如在配置交易中的某组织管理员）对自己进行身份验证。
+- 节点的本地 MSP 允许用户端在其交易中作为通道的成员（例如在链码交易中）或作为系统中特定角色的所有者（例如在配置交易中的某组织管理员）对用户进行身份验证。
 
-MSP定义了谁拥有该级别的管理或参与权（节点管理员不一定是通道管理员，反之亦然），因此一个node必须由一个local msp定义一些权限。
+MSP定义了谁拥有该级别的管理或参与权（节点管理员不一定是通道管理员，反之亦然），Local MSP为节点（peer 或 orderer）和用户（使用CLI或使用SDK的客户端应用程序的管理员）定义的。每一个peer orderer都必须有一个local msp，因为他们必须会有相应的权限，以便在加入区块链的时候，进行权限验证。。
 
 ## Channel MSP
 
-channel msp 定义了通道级别的管理权，和参与权，每个参与通道的组织都必须有一个 MSP：
+channel msp 定义了通道级别的管理权，和参与权，每个参与通道的组织都必须有一个Channel MSP（规定了谁可以代表该组织）：
 
 * 通道上的 Peer 节点和排序节点将共享通道 MSP，因此能够正确地对通道参与者进行身份验证。
-* 如果某个组织希望加入通道，则需要在通道配置中加入一个包含该组织成员信任链的 MSP。否则，由该组织身份发起的交易将被拒绝。
+  * Channel MSP包含加入通道的所有组织的MSP信息。Channel MSP上的Peers 和 orderers将在Channel上共享数据，并且此后将能够正确认证Channel参与者。这意味着如果一个组织希望加入该Channel，那么需要在该Channel配置中，加入一个包含该组织成员的信任链的MSP。否则来自该组织身份的交易将被拒绝。
+  * **实际上，**Channel MSP在channel中的每个节点的文件系统上,实例化并且通过共识保持同步**。也就是说**，Channel通道中的每个节点的本地文件系统上存着每个channel MSP的副本。但从逻辑上来看，channel MSP驻留在channel或网络上并由其维护。Channel MSP的存在，使得加入通道中的所有节点之间的数据共享。
+* 如果某个组织希望加入通道，则需要在通道配置中加入一个包含该组织成员信任链的 MSP，可以表示该组织加入了通道。否则，由该组织身份发起的交易将被拒绝。
 
 ![](./images/ChannelMSPConfig.png)
 
@@ -124,13 +130,22 @@ org使用一个MSP管理org中的所有的member
 
 ## Organizational Units(OUs) an MSP
 
-一个Org可能由于业务原因分为多个OU，如ORG1.MANUFACTURING and ORG1.DISTRIBUTION。
+每个组织可能由于业务原因分为多个OU organization units，每一个ou都有不同的责任（比如一个组织可能有营销部或市场部）。
 
-当一个CA给一个节点颁发X.509证书时，证书里的OU字段表示了该identity属于哪一个业务，从而MSP决定了该identity具有什么样的权限，从而实现了权限管理。
+当ca颁布一个证书时，证书里的OU字段表示了该identity属于哪一个业务部。这样做的好处就是可以进行更细粒度的权限控制。
 
 ## Node OU 
 
 没怎么看懂，仔细看一下
+
+Node OU can be used to confer a role onto an identity. Node OU roles are defined in the $FABRIC_CFG_PATH/msp/config.yaml file and contain a list of organizational units whose members are considered to be part of the organization represented by this MSP.
+
+- This is particularly useful when you want to restrict the members of an organization to the ones holding an identity (signed by one of MSP designated CAs) with a specific Node OU role in it.
+- For example, with node OU’s you can implement a more granular endorsement policy that requires Org1 peers to endorse a transaction, rather than any member of Org1.
+
+
+
+![MSP1c](http://haoimg.hifool.cn/img/ca-msp-visualization.png)
 
 
 
@@ -170,6 +185,14 @@ Notice that if the `NodeOUs.ClientOUIdentifier` section (`NodeOUs.AdminOUIdentif
 Identities can use organizational units to be classified as either a client, an admin, a peer, or an orderer. The four classifications are mutually exclusive. The 1.1 channel capability needs to be enabled before identities can be classified as clients or peers. The 1.4.3 channel capability needs to be enabled for identities to be classified as an admin or orderer.
 
 Classification allows identities to be classified as admins (and conduct administrator actions) without the certificate being stored in the `admincerts` folder of the MSP. Instead, the `admincerts` folder can remain empty and administrators can be created by enrolling identities with the admin OU. Certificates in the `admincerts` folder will still grant the role of administrator to their bearer, provided that they possess the client or admin OU.
+
+
+
+![MSP1d](http://haoimg.hifool.cn/img/signcert.png)
+
+Note: For Channel MSPs, just because an actor has the role of an administrator it doesn’t mean that they can administer particular resources. The actual power a given identity has with respect to administering the system is determined by the policies that manage system resources. 
+
+- For example, a channel policy might specify that ORG1-MANUFACTURING administrators, meaning identities with a role of admin and a Node OU of ORG1-MANUFACTURING, have the rights to add new organizations to the channel, whereas the ORG1-DISTRIBUTION administrators have no such rights.
 
 
 
