@@ -22,7 +22,7 @@
 
 Fabric中并不是所有的客户端发起的交易顺利入链，当遇到高吞吐量的场景时，便会遇到性能瓶颈。
 
-![](../images/fabric-throughput.png)
+![](../../images/fabric-throughput.png)
 
 造成Fabric吞吐量低的原因：
 
@@ -39,7 +39,7 @@ Fabric中并不是所有的客户端发起的交易顺利入链，当遇到高�
 
 ## Fabric 如何处理交易？
 
-![](../images/fabric-workflow.png)
+![](../../images/fabric-workflow.png)
 
 大致可以划分为四个阶段：
 
@@ -70,7 +70,7 @@ Fabric中并不是所有的客户端发起的交易顺利入链，当遇到高�
 
 ## 0.交易重排的重要性：
 
-![](../images/transaction-reorder.png)
+![](../../images/transaction-reorder.png)
 
 ---
 

@@ -1,5 +1,21 @@
 # Fabric 提高TPS吞吐量的改造
 
+论文名称：Blurring the Lines between Blockchains and Database Systems: the Case of Hyperledger Fabric
+
+德国沙尔大学---大数据实验室：[实验室官网](https://bigdata.uni-saarland.de/research/research.php)
+
+- 计算机科学系是德国最好的四个计算机科学系之一。
+- 论文发表情况：SIGMOD 2019, SIGKDD 2019, SIGMOD 2018 * 2, ICDE 2018, VLDB 2017
+- 研究方向大致为：数据库（比重最大），机器学习，区块链
+
+实验室研究主题：更快的处理大数据。
+
+- For almost eighteen years our research topic has been "Fast access to large data", providing query processing techniques allowing you to manage very large datasets.
+
+---
+
+
+
 Fabric生命周期的图
 
 ![Fabric-工作流](http://qhczuqqky.hn-bkt.clouddn.com/img/image-20200929095118669.png)
@@ -21,6 +37,13 @@ Fabric生命周期的图
 6. Commit peer 节点对收到区块进行验证，并向 SDK 发送新收到的区块和验证结果
    1. commit peer 根据所收到的envelop中所包括的各个交易，进行对各个交易的读写集进行验证工作，如果各个交易的键值对版本发生了冲突，那么只会有一个交易成功入链
 7. SDK 根据事件中的验证结果，判断交易是否成功上链
+
+
+
+对于数据库来讲，根据数据库的ACID原则（原子性、一致性、隔离性与持久性），在交易生成后就可以判定一个交易是否合法，即：要么执行该交易，要么不执行该交易，而不会在持久化时在去判断一个交易是否合法。但是在fabric中，验证一笔交易是否和法是在validation阶段完成的，而不是在simulation阶段完成的，那么，是否可以在simulation阶段提前中断一笔交易的合法性呢？
+
+1. 交易重排
+2. 提前阻断
 
 
 
@@ -112,7 +135,7 @@ Fabric性能提升的关键：交易合法性的验证
 
 如果能够提前的检测出一笔交易是非法交易，就可以提前中断该交易的生命周期，节省出一大部分的时间成本。
 
-对于数据库来讲，根据数据库的ACID原则（原子性、一致性、隔离性与持久性），在交易生成后就可以判定一个交易是否合法，即要么执行该交易，要么不执行该交易，而不会在持久化时在去判断一个交易是否合法。但是在fabric中，验证一笔交易是否和法是在validation阶段完成的，而不是在simulation阶段完成的，那么，是否可以在simulation阶段提前中断一笔交易的合法性呢？
+对于数据库来讲，根据数据库的ACID原则（原子性、一致性、隔离性与持久性），在交易生成后就可以判定一个交易是否合法，即：要么执行该交易，要么不执行该交易，而不会在持久化时在去判断一个交易是否合法。但是在fabric中，验证一笔交易是否和法是在validation阶段完成的，而不是在simulation阶段完成的，那么，是否可以在simulation阶段提前中断一笔交易的合法性呢？
 
 可以在commit phase 之前，还有三个提前中断非法交易的机会，分别是simulation、ordering和validation
 
