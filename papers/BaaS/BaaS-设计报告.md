@@ -36,15 +36,7 @@
 
 ## 组织内证书的管理
 
-![image-20201027101747740](http://haoimg.hifool.cn/img/image-20201027101747740.png)
-
 ## 组织内用户的管理
-
-![img](http://haoimg.hifool.cn/img/13388101-8863d701bc250f85.png)
-
-
-
-![image-20201027124814278](http://haoimg.hifool.cn/img/image-20201027124814278.png)
 
 ## 组织内的权限管理
 
