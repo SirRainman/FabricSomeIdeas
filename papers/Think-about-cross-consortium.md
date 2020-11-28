@@ -167,7 +167,7 @@ Fabric中没有轻节点的概念，fabric中节点可以分为：client/peer/or
 
 在这里贴一下贴一下交易的生命周期，以便自己有一个宏观的认识
 
-![](F:/Rain/Post-Graduate/区块链/fabric2-doc-learn/images/peers-app.png)
+![](../images/peers-app.png)
 
 app提交交易流程：
 
