@@ -168,7 +168,7 @@ chaincode
 
 ## 3 数据流图
 
-![分析功能](http://qhczuqqky.hn-bkt.clouddn.com/img/%E5%88%86%E6%9E%90%E5%8A%9F%E8%83%BD.jpg)
+![image-20201104192948002](http://haoimg.hifool.cn//img/image-20201104192948002.png)
 
 1. 用户注册、登陆
    1. kubernetes sdk 负责

@@ -202,7 +202,7 @@ fabric-samples\test-network\organizations\fabric-ca
 
 区块链的配置信息都在创世区块中，orderer和channel在创建的时候需要知道一些配置信息，这些配置信息一般都是在创世区块中指定的。
 
-生成创世区块主要靠的是Configtxgen这个二进制工具，该工具通过读取"configtx.yaml"这个文件中"TwoOrgsOrdererGenesis"指定的配置信息，从而生成相应的创世区块。
+生成创世区块主要靠的是Configtxgen这个二进制工具，该工具通过读取"test-network/configtx/configtx.yaml"这个文件中"TwoOrgsOrdererGenesis"指定的配置信息，从而生成相应的创世区块。
 
 在"configtx.yaml"这个配置文件中：
 
